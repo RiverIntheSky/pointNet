@@ -15,9 +15,9 @@ import pointnet_part_seg as model
 # DEFAULT SETTINGS
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', type=int, default=1, help='GPU to use [default: GPU 0]')
-parser.add_argument('--batch', type=int, default=32, help='Batch Size during training [default: 32]')
-parser.add_argument('--epoch', type=int, default=200, help='Epoch to run [default: 200]')
-parser.add_argument('--point_num', type=int, default=2048, help='Point Number [256/512/1024/2048]')
+parser.add_argument('--batch', type=int, default=12, help='Batch Size during training [default: 32]')
+parser.add_argument('--epoch', type=int, default=50, help='Epoch to run [default: 50]')
+parser.add_argument('--point_num', type=int, default=1024, help='Point Number [256/512/1024/2048]')
 parser.add_argument('--output_dir', type=str, default='train_results', help='Directory that stores all training logs and trained models')
 parser.add_argument('--wd', type=float, default=0, help='Weight Decay [Default: 0.0]')
 FLAGS = parser.parse_args()
@@ -64,8 +64,8 @@ MOMENTUM = 0.9
 TRAINING_EPOCHES = FLAGS.epoch
 print('### Training epoch: {0}'.format(TRAINING_EPOCHES))
 
-TRAINING_FILE_LIST = os.path.join(data_dir, 'train_file_list.txt')
-TESTING_FILE_LIST = os.path.join(data_dir, 'test_file_list.txt')
+TRAINING_FILE_LIST = os.path.join(data_dir, 'train_file_list_large.txt')
+TESTING_FILE_LIST = os.path.join(data_dir, 'test_file_list_large.txt')
 
 MODEL_STORAGE_PATH = os.path.join(output_dir, 'trained_models')
 if not os.path.exists(MODEL_STORAGE_PATH):
@@ -300,7 +300,6 @@ def train():
             for i in range(num_batch):
 
                 begidx = i * batch_size
-                endidx = (i + 1) * batch_size
 
                 cur_data = np.empty([batch_size, point_num, 3], dtype = np.float32)
                 cur_seg = np.empty([batch_size, point_num], dtype = np.int32)
@@ -343,10 +342,10 @@ def train():
                 total_label_acc += np.mean(np.float32(per_instance_label_pred == cur_labels))
                 total_seg_acc += average_part_acc
 
-                for shape_idx in range(begidx, endidx):
+                for shape_idx in range(batch_size):
                     total_seen_per_cat[cur_labels[shape_idx]] += 1
-                    total_label_acc_per_cat[cur_labels[shape_idx]] += np.int32(per_instance_label_pred[shape_idx-begidx] == cur_labels[shape_idx])
-                    total_seg_acc_per_cat[cur_labels[shape_idx]] += per_instance_part_acc[shape_idx - begidx]
+                    total_label_acc_per_cat[cur_labels[shape_idx]] += np.int32(per_instance_label_pred[shape_idx] == cur_labels[shape_idx])
+                    total_seg_acc_per_cat[cur_labels[shape_idx]] += per_instance_part_acc[shape_idx]
 
             total_loss = total_loss * 1.0 / total_seen
             total_label_loss = total_label_loss * 1.0 / total_seen
