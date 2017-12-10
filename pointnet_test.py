@@ -8,6 +8,8 @@ import fileLoader as provider
 
 point_num = 2048
 num_labels = 3
+segmentation = True
+part_num=14
 
 def generate_data(batch_size=32, n_samples=1024):
     out = np.zeros((batch_size, n_samples, 3))
@@ -122,33 +124,70 @@ def generate_data(batch_size=32, n_samples=1024):
 
 import sys
 import keras
-from keras.models import Sequential
-from keras.layers import Dense, Dropout, Activation, Flatten
+from keras.models import Sequential, Model
+from keras.layers import Dense, Dropout, Activation, Flatten, Input
 from keras.layers import Conv2D, MaxPooling2D
 import os
 
-model = Sequential()
-model.add(Conv2D(64, (1, 3), padding='valid', batch_input_shape=(32, point_num, 3, 1))) #Note: assumes tensor flow channel ordering B x W x H x C
-model.add(Activation('relu'))
-model.add(Conv2D(64, (1, 1)))
-model.add(Activation('relu'))
-model.add(Conv2D(64, (1, 1)))
-model.add(Activation('relu'))
-model.add(Conv2D(128, (1, 1)))
-model.add(Activation('relu'))
-model.add(Conv2D(1024, (1, 1)))
-model.add(Activation('relu'))
+if segmentation:
+    point_data = Input(shape=(num_train_file, point_num, 3, 1), dtype='float32', name='point_cloud')
+    # transformation 1
+    out1 = Conv2D(64, (1, 3), padding='valid', batch_input_shape=(32, point_num, 3, 1), activation='relu')(point_data)
+    out2 = Conv2D(128, (1, 1), activation='relu')(out1)
+    out3 = Conv2D(128, (1, 1), activation='relu')(out2)
 
-model.add(MaxPooling2D(pool_size=(point_num, 1)))
-model.add(Flatten())
+    # transformation 2
+    out4 = Conv2D(512, (1, 1), activation='relu')(out3)
+    out5 = Conv2D(2048, (1, 1), activation='relu')(out4)
 
-model.add(Dense(512))
-model.add(Activation('relu'))
-model.add(Dense(256))
-model.add(Activation('relu'))
-#model.add(Dropout(0.5))
-model.add(Dense(num_labels))
-model.add(Activation('softmax'))
+    out_max = MaxPooling2D(pool_size=(point_num, 1))(out5)
+
+    net = Flatten()(out_max)
+    net = Dense(256, activation='relu')(net)
+    net = Dense(256, activation='relu')(net)
+    # net = Dropout(0.7)(net)
+    cls_out = Dense(num_labels, activation='softmax')(net)
+
+    # segmentation network
+    label = Input(shape=(num_train_file, 1, 1, num_labels))
+    out_max = keras.layers.concatenate([out_max, label], axis = 3)
+
+    expand = keras.backend.tile(out_max, [1, point_num, 1, 1])
+    concat = keras.layers.concatenate([expand, out1, out2, out3, out4, out5], axis = 3)
+
+
+    net2 = Conv2D(256, (1,1), padding='valid', activation='relu')(concat)
+    net2 = Dropout(0.8)(net2)
+    net2 = Conv2D(256, (1,1), padding='valid', activation='relu')(net2)
+    net2 = Dropout(0.8)(net2)
+    net2 = Conv2D(128, (1,1), padding='valid', activation='relu')(net2)
+    net2 = Conv2D(part_num, (1,1), padding='valid')(net2)
+
+    net2 = tf.reshape(net2, [batch_size, num_point, part_num])
+
+else:
+    model = Sequential()
+    model.add(Conv2D(64, (1, 3), padding='valid', batch_input_shape=(32, point_num, 3, 1))) #Note: assumes tensor flow channel ordering B x W x H x C
+    model.add(Activation('relu'))
+    model.add(Conv2D(64, (1, 1)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(64, (1, 1)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(128, (1, 1)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(1024, (1, 1)))
+    model.add(Activation('relu'))
+
+    model.add(MaxPooling2D(pool_size=(point_num, 1)))
+    model.add(Flatten())
+
+    model.add(Dense(512))
+    model.add(Activation('relu'))
+    model.add(Dense(256))
+    model.add(Activation('relu'))
+    #model.add(Dropout(0.5))
+    model.add(Dense(num_labels))
+    model.add(Activation('softmax'))
 
 
 #sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.9, nesterov=True)
@@ -184,7 +223,7 @@ for i in range(num_train_file):
     train_data[i, :, :] = data
     train_labels[i] = label
 
-model.fit(np.expand_dims(train_data, axis = 3), to_categorical(train_labels, num_labels), batch_size=32, epochs=50)
+model.fit(np.expand_dims(train_data, axis = 3), to_categorical(train_labels, num_labels), batch_size=32, epochs=30)
 
 print('Testing:')
 #test_data, test_labels = generate_data(32, num_point)
