@@ -187,9 +187,11 @@ def train():
         test_writer = tf.summary.FileWriter(SUMMARIES_FOLDER + '/test')
 
         train_file_list = provider.getDataFiles(TRAINING_FILE_LIST)
-        num_train_file = len(train_file_list)
+        #num_train_file = len(train_file_list)
+        num_train_file = 20
         test_file_list = provider.getDataFiles(TESTING_FILE_LIST)
-        num_test_file = len(test_file_list)
+        num_test_file = 20
+        #num_test_file = len(test_file_list)
 
         fcmd = open(os.path.join(LOG_STORAGE_PATH, 'cmd.txt'), 'w')
         fcmd.write(str(FLAGS))
@@ -198,7 +200,7 @@ def train():
         # write logs to the disk
         flog = open(os.path.join(LOG_STORAGE_PATH, 'log.txt'), 'w')
 
-        def train_one_epoch(train_file_idx, epoch_num):
+        def train_one_epoch(cur_data, cur_seg, cur_labels, cur_labels_one_hot, epoch_num):
             is_training = True
 
             num_batch = num_train_file // batch_size
@@ -209,29 +211,15 @@ def train():
             total_label_acc = 0.0
             total_seg_acc = 0.0
 
-            for i in range(num_batch):
-                begidx = i * batch_size
-
-                cur_data = np.empty([batch_size, point_num, 3], dtype=np.float32)
-                cur_seg = np.empty([batch_size, point_num], dtype=np.int32)
-                cur_labels = np.empty([batch_size], dtype=np.int32)
-
-                for j in range(batch_size):
-                    cur_train_filename = os.path.join(data_dir, train_file_list[train_file_idx[begidx + j]])
-                    # printout(flog, 'Loading train file ' + cur_train_filename)
-
-                    data, label, seg = provider.loadDataFile_with_seg(cur_train_filename, point_num)
-                    cur_data[j, :, :] = data
-                    cur_seg[j, :] = seg
-                    cur_labels[j] = label
-
-                cur_labels_one_hot = convert_label_to_one_hot(cur_labels)
+            for j in range(num_batch):
+                begidx = j * batch_size
+                endidx = (j + 1) * batch_size
 
                 feed_dict = {
-                    pointclouds_ph: cur_data,
-                    labels_ph: cur_labels,
-                    input_label_ph: cur_labels_one_hot,
-                    seg_ph: cur_seg,
+                    pointclouds_ph: cur_data[begidx: endidx, ...],
+                    labels_ph: cur_labels[begidx: endidx, ...],
+                    input_label_ph: cur_labels_one_hot[begidx: endidx, ...],
+                    seg_ph: cur_seg[begidx: endidx, ...],
                     is_training_ph: is_training,
                 }
 
@@ -241,7 +229,7 @@ def train():
                                 per_instance_seg_loss, labels_pred, seg_pred, per_instance_seg_pred_res], \
                                feed_dict=feed_dict)
 
-                per_instance_part_acc = np.mean(pred_seg_res == cur_seg, axis=1)
+                per_instance_part_acc = np.mean(pred_seg_res == cur_seg[begidx: endidx, ...], axis=1)
                 average_part_acc = np.mean(per_instance_part_acc)
 
                 total_loss += loss_val
@@ -249,7 +237,7 @@ def train():
                 total_seg_loss += seg_loss_val
 
                 per_instance_label_pred = np.argmax(label_pred_val, axis=1)
-                total_label_acc += np.mean(np.float32(per_instance_label_pred == cur_labels))
+                total_label_acc += np.mean(np.float32(per_instance_label_pred == cur_labels[begidx: endidx, ...]))
                 total_seg_acc += average_part_acc
 
             total_loss = total_loss * 1.0 / num_batch
@@ -281,7 +269,7 @@ def train():
             printout(flog, '\t\tTraining Seg Mean_loss: %f' % total_seg_loss)
             printout(flog, '\t\tTraining Seg Accuracy: %f' % total_seg_acc)
 
-        def eval_one_epoch(epoch_num):
+        def eval_one_epoch(cur_data, cur_seg, cur_labels, cur_labels_one_hot, epoch_num):
             is_training = False
 
             total_loss = 0.0
@@ -297,32 +285,18 @@ def train():
 
             num_batch = num_test_file // batch_size
 
-            for i in range(num_batch):
+            for j in range(num_batch):
 
-                begidx = i * batch_size
-
-                cur_data = np.empty([batch_size, point_num, 3], dtype = np.float32)
-                cur_seg = np.empty([batch_size, point_num], dtype = np.int32)
-                cur_labels = np.empty([batch_size], dtype = np.int32)
-
-                for j in range(batch_size):
-                    cur_test_filename = os.path.join(data_dir, test_file_list[begidx + j])
-                    #printout(flog, 'Loading test file ' + cur_test_filename)
-
-                    data, label, seg = provider.loadDataFile_with_seg(cur_test_filename, point_num)
-                    cur_data[j, :, :] = data
-                    cur_seg[j, :] = seg
-                    cur_labels[j] = label
-
-                cur_labels_one_hot = convert_label_to_one_hot(cur_labels)
+                begidx = j * batch_size
+                endidx = (j + 1) * batch_size
 
                 feed_dict = {
-                        pointclouds_ph: cur_data,
-                        labels_ph: cur_labels,
-                        input_label_ph: cur_labels_one_hot,
-                        seg_ph: cur_seg,
-                        is_training_ph: is_training,
-                        }
+                    pointclouds_ph: cur_data[begidx: endidx, ...],
+                    labels_ph: cur_labels[begidx: endidx, ...],
+                    input_label_ph: cur_labels_one_hot[begidx: endidx, ...],
+                    seg_ph: cur_seg[begidx: endidx, ...],
+                    is_training_ph: is_training,
+                }
 
                 loss_val, label_loss_val, seg_loss_val, per_instance_label_loss_val, \
                         per_instance_seg_loss_val, label_pred_val, seg_pred_val, pred_seg_res \
@@ -330,22 +304,23 @@ def train():
                         per_instance_seg_loss, labels_pred, seg_pred, per_instance_seg_pred_res], \
                         feed_dict=feed_dict)
 
-                per_instance_part_acc = np.mean(pred_seg_res == cur_seg, axis=1)
+                per_instance_part_acc = np.mean(pred_seg_res == cur_seg[begidx: endidx, ...], axis=1)
                 average_part_acc = np.mean(per_instance_part_acc)
 
                 total_seen += 1
                 total_loss += loss_val
                 total_label_loss += label_loss_val
                 total_seg_loss += seg_loss_val
-                    
+
                 per_instance_label_pred = np.argmax(label_pred_val, axis=1)
-                total_label_acc += np.mean(np.float32(per_instance_label_pred == cur_labels))
+                total_label_acc += np.mean(np.float32(per_instance_label_pred == cur_labels[begidx: endidx, ...]))
                 total_seg_acc += average_part_acc
 
-                for shape_idx in range(batch_size):
+                for shape_idx in range(begidx, endidx):
                     total_seen_per_cat[cur_labels[shape_idx]] += 1
-                    total_label_acc_per_cat[cur_labels[shape_idx]] += np.int32(per_instance_label_pred[shape_idx] == cur_labels[shape_idx])
-                    total_seg_acc_per_cat[cur_labels[shape_idx]] += per_instance_part_acc[shape_idx]
+                    total_label_acc_per_cat[cur_labels[shape_idx]] += np.int32(
+                        per_instance_label_pred[shape_idx - begidx] == cur_labels[shape_idx])
+                    total_seg_acc_per_cat[cur_labels[shape_idx]] += per_instance_part_acc[shape_idx - begidx]
 
             total_loss = total_loss * 1.0 / total_seen
             total_label_loss = total_label_loss * 1.0 / total_seen
@@ -353,10 +328,12 @@ def train():
             total_label_acc = total_label_acc * 1.0 / total_seen
             total_seg_acc = total_seg_acc * 1.0 / total_seen
 
-            test_loss_sum, test_label_acc_sum, test_label_loss_sum, test_seg_loss_sum, test_seg_acc_sum = sess.run(\
-                    [total_test_loss_sum_op, label_test_acc_sum_op, label_test_loss_sum_op, seg_test_loss_sum_op, seg_test_acc_sum_op], \
-                    feed_dict={total_testing_loss_ph: total_loss, label_testing_loss_ph: total_label_loss, \
-                    seg_testing_loss_ph: total_seg_loss, label_testing_acc_ph: total_label_acc, seg_testing_acc_ph: total_seg_acc})
+            test_loss_sum, test_label_acc_sum, test_label_loss_sum, test_seg_loss_sum, test_seg_acc_sum = sess.run( \
+                [total_test_loss_sum_op, label_test_acc_sum_op, label_test_loss_sum_op, seg_test_loss_sum_op,
+                seg_test_acc_sum_op], \
+                feed_dict={total_testing_loss_ph: total_loss, label_testing_loss_ph: total_label_loss, \
+                           seg_testing_loss_ph: total_seg_loss, label_testing_acc_ph: total_label_acc,
+                           seg_testing_acc_ph: total_seg_acc})
 
             # not sure??
             #test_writer.add_summary(test_loss_sum, (epoch_num+1) * num_train_file-1)
@@ -386,16 +363,54 @@ def train():
         if not os.path.exists(MODEL_STORAGE_PATH):
             os.mkdir(MODEL_STORAGE_PATH)
 
+        # load training data
+        printout(flog, '\tLoading total %d training data. Might take a few minutes' % num_train_file)
+        train_data = np.empty([num_train_file, point_num, 3], dtype=np.float32)
+        train_seg = np.empty([num_train_file, point_num], dtype=np.int32)
+        train_labels = np.empty([num_train_file], dtype=np.int32)
+
+        for i in range(num_train_file):
+            cur_train_filename = os.path.join(data_dir, train_file_list[i])
+            # printout(flog, 'Loading train file ' + cur_train_filename)
+
+            data, label, seg = provider.loadDataFile_with_seg(cur_train_filename, point_num)
+            train_data[i, :, :] = data
+            train_seg[i, :] = seg
+            train_labels[i] = label
+
+        train_labels_one_hot = convert_label_to_one_hot(train_labels)
+
+        # load testing data
+        printout(flog, '\tLoading total %d testing data. Might take a few minutes' % num_test_file)
+        test_data = np.empty([num_test_file, point_num, 3], dtype=np.float32)
+        test_seg = np.empty([num_test_file, point_num], dtype=np.int32)
+        test_labels = np.empty([num_test_file], dtype=np.int32)
+
+        for i in range(num_test_file):
+            cur_train_filename = os.path.join(data_dir, test_file_list[i])
+            # printout(flog, 'Loading train file ' + cur_train_filename)
+
+            data, label, seg = provider.loadDataFile_with_seg(cur_train_filename, point_num)
+            test_data[i, :, :] = data
+            test_seg[i, :] = seg
+            test_labels[i] = label
+
+        test_labels_one_hot = convert_label_to_one_hot(test_labels)
+
         for epoch in range(TRAINING_EPOCHES):
             printout(flog, '\n<<< Testing on the test dataset ...')
-            eval_one_epoch(epoch)
+            eval_one_epoch(test_data, test_seg, test_labels, test_labels_one_hot, epoch)
 
             printout(flog, '\n>>> Training for the epoch %d/%d ...' % (epoch, TRAINING_EPOCHES))
 
-            train_file_idx = np.arange(0, len(train_file_list))
+            train_file_idx = np.arange(0, num_train_file)
             np.random.shuffle(train_file_idx)
 
-            train_one_epoch(train_file_idx, epoch)
+            train_one_epoch(train_data[train_file_idx, ...],
+                            train_seg[train_file_idx, ...],
+                            train_labels[train_file_idx, ...],
+                            train_labels_one_hot[train_file_idx, ...],
+                            epoch)
 
             if (epoch+1) % 10 == 0:
                 cp_filename = saver.save(sess, os.path.join(MODEL_STORAGE_PATH, 'epoch_' + str(epoch+1)+'.ckpt'))
