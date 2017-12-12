@@ -6,18 +6,25 @@ from datetime import datetime
 import json
 import os
 import sys
+import fileLoader as provider
+import pointnet_part_seg as model
+import random
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.dirname(BASE_DIR))
-import fileLoader as provider
-import pointnet_part_seg as model
+
+dic = {'church': 0,
+       'sand_castle':1,
+       'playground':2,
+       'moon_base':3}
 
 # DEFAULT SETTINGS
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', type=int, default=1, help='GPU to use [default: GPU 0]')
-parser.add_argument('--batch', type=int, default=10, help='Batch Size during training [default: 32]')
+parser.add_argument('--batch', type=int, default=32, help='Batch Size during training [default: 32]')
 parser.add_argument('--epoch', type=int, default=300, help='Epoch to run [default: 50]')
-parser.add_argument('--point_num', type=int, default=1024, help='Point Number [256/512/1024/2048]')
+parser.add_argument('--point_num', type=int, default=2048, help='Point Number [256/512/1024/2048]')
 parser.add_argument('--output_dir', type=str, default='train_results', help='Directory that stores all training logs and trained models')
 parser.add_argument('--wd', type=float, default=0, help='Weight Decay [Default: 0.0]')
 FLAGS = parser.parse_args()
@@ -45,7 +52,7 @@ all_cats = json.load(open(os.path.join(data_dir, 'overallid_to_catid_partid.json
 NUM_CATEGORIES = 4
 NUM_PART_CATS = len(all_cats)
 #NUM_CATEGORIES = 1
-#NUM_PART_CATS = 4
+#NUM_PART_CATS = 6
 
 print('#### Batch Size: {0}'.format(batch_size))
 print('#### Point Number: {0}'.format(point_num))
@@ -80,6 +87,13 @@ if not os.path.exists(LOG_STORAGE_PATH):
 SUMMARIES_FOLDER =  os.path.join(output_dir, 'summaries')
 if not os.path.exists(SUMMARIES_FOLDER):
     os.mkdir(SUMMARIES_FOLDER)
+
+def pc_normalize(pc):
+    centroid = np.mean(pc, axis=0)
+    pc = pc - centroid
+    m = np.max(np.sqrt(np.sum(pc**2, axis=1)))
+    pc = pc / m
+    return pc
 
 def printout(flog, data):
 	print(data)
@@ -371,40 +385,81 @@ def train():
         train_seg = np.empty([num_train_file, point_num], dtype=np.int32)
         train_labels = np.empty([num_train_file], dtype=np.int32)
 
-        for i in range(num_train_file):
-            cur_train_filename = os.path.join(data_dir, train_file_list[i])
-            print(i)
-            data, label, seg = provider.loadDataFile_with_seg(cur_train_filename, point_num)
-            train_data[i, :, :] = data
-            train_seg[i, :] = seg
-            train_labels[i] = label
+        #for i in range(num_train_file):
+        #    cur_train_filename = os.path.join(data_dir, train_file_list[i])
+        #    print(i)
+        #    data, label, seg = provider.loadDataFile_with_seg(cur_train_filename, point_num)
+        #    train_data[i, :, :] = data
+        #    train_seg[i, :] = seg
+        #    train_labels[i] = label
 
-        train_labels_one_hot = convert_label_to_one_hot(train_labels)
+        #train_labels_one_hot = convert_label_to_one_hot(train_labels)
 
         # load testing data
-        print('\tLoading total %d testing data. Might take a few minutes' % num_test_file)
+        #print('\tLoading total %d testing data. Might take a few minutes' % num_test_file)
         test_data = np.empty([num_test_file, point_num, 3], dtype=np.float32)
         test_seg = np.empty([num_test_file, point_num], dtype=np.int32)
         test_labels = np.empty([num_test_file], dtype=np.int32)
 
-        for i in range(num_test_file):
-            cur_train_filename = os.path.join(data_dir, test_file_list[i])
-            print(i)
-            data, label, seg = provider.loadDataFile_with_seg(cur_train_filename, point_num)
-            test_data[i, :, :] = data
-            test_seg[i, :] = seg
-            test_labels[i] = label
+        #for i in range(num_test_file):
+        #    cur_train_filename = os.path.join(data_dir, test_file_list[i])
+        #    print(i)
+        #    data, label, seg = provider.loadDataFile_with_seg(cur_train_filename, point_num)
+        #    test_data[i, :, :] = data
+        #    test_seg[i, :] = seg
+        #    test_labels[i] = label
 
-        test_labels_one_hot = convert_label_to_one_hot(test_labels)
+        #test_labels_one_hot = convert_label_to_one_hot(test_labels)
 
         for epoch in range(TRAINING_EPOCHES):
             printout(flog, '\n<<< Testing on the test dataset ...')
+            for t in range(num_test_file):
+                filename = os.path.join(data_dir, 'test_%s' % test_file_list[t])
+
+                points_seg = np.load('%s.npy'%filename)
+                points_seg = random.sample(points_seg, point_num)
+                points_seg = np.array(points_seg)
+
+                points = points_seg[:, :3].astype(float)
+
+                points = pc_normalize(points)
+
+                seg = points_seg[:, -1].astype(int)
+                category = filename.split('/')[-2]
+                category = category.replace('test_', '')
+                label = dic[category]
+
+                test_data[t, :, :] = points
+                test_seg[t, :] = seg
+                test_labels[t] = label
+            test_labels_one_hot = convert_label_to_one_hot(test_labels)
             eval_one_epoch(test_data, test_seg, test_labels, test_labels_one_hot, epoch)
 
             printout(flog, '\n>>> Training for the epoch %d/%d ...' % (epoch, TRAINING_EPOCHES))
 
             train_file_idx = np.arange(0, num_train_file)
             np.random.shuffle(train_file_idx)
+
+            for t in range(num_train_file):
+                filename = os.path.join(data_dir, 'test_%s' % train_file_list[t])
+
+                points_seg = np.load('%s.npy'%filename)
+                points_seg = random.sample(points_seg, point_num)
+                points_seg = np.array(points_seg)
+
+                points = points_seg[:, :3].astype(float)
+
+                points = pc_normalize(points)
+
+                seg = points_seg[:, -1].astype(int)
+                category = filename.split('/')[-2]
+                category = category.replace('test_', '')
+                label = dic[category]
+
+                train_data[t, :, :] = points
+                train_seg[t, :] = seg
+                train_labels[t] = label
+            train_labels_one_hot = convert_label_to_one_hot(train_labels)
 
             train_one_epoch(train_data[train_file_idx, ...],
                             train_seg[train_file_idx, ...],
