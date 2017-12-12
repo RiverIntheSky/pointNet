@@ -1,5 +1,5 @@
-ls scenes/sand_castle/ >> train_file_lists_s.txt
-sed -i -e 's/^/sand_castle\//' train_file_lists_s.txt
-sed -i '/mtl/d' train_file_lists_s.txt
-less train_file_lists_s.txt >> train_file_lists.txt
-sed -i '/graph/d' train_file_lists.txt
+ls scenes/church/ >> train_file_listchurch.txt
+sed -i -e 's/^/church\//' train_file_listchurch.txt
+less train_file_listchurch.txt >> train_file_list.txt
+sed -i '/mtl/d' train_file_list.txt
+sed -i '/graph/d' train_file_list.txt

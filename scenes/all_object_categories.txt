@@ -1,3 +1,4 @@
 church	0
 sand_castle	1
 playground	2
+moon_base       3

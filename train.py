@@ -15,8 +15,8 @@ import pointnet_part_seg as model
 # DEFAULT SETTINGS
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', type=int, default=1, help='GPU to use [default: GPU 0]')
-parser.add_argument('--batch', type=int, default=12, help='Batch Size during training [default: 32]')
-parser.add_argument('--epoch', type=int, default=50, help='Epoch to run [default: 50]')
+parser.add_argument('--batch', type=int, default=10, help='Batch Size during training [default: 32]')
+parser.add_argument('--epoch', type=int, default=300, help='Epoch to run [default: 50]')
 parser.add_argument('--point_num', type=int, default=1024, help='Point Number [256/512/1024/2048]')
 parser.add_argument('--output_dir', type=str, default='train_results', help='Directory that stores all training logs and trained models')
 parser.add_argument('--wd', type=float, default=0, help='Weight Decay [Default: 0.0]')
@@ -42,8 +42,10 @@ all_obj_cats = [(line.split()[0], line.split()[1]) for line in lines]
 fin.close()
 
 all_cats = json.load(open(os.path.join(data_dir, 'overallid_to_catid_partid.json'), 'r'))
-NUM_CATEGORIES = 3
+NUM_CATEGORIES = 4
 NUM_PART_CATS = len(all_cats)
+#NUM_CATEGORIES = 1
+#NUM_PART_CATS = 4
 
 print('#### Batch Size: {0}'.format(batch_size))
 print('#### Point Number: {0}'.format(point_num))
@@ -64,8 +66,8 @@ MOMENTUM = 0.9
 TRAINING_EPOCHES = FLAGS.epoch
 print('### Training epoch: {0}'.format(TRAINING_EPOCHES))
 
-TRAINING_FILE_LIST = os.path.join(data_dir, 'train_file_list_large.txt')
-TESTING_FILE_LIST = os.path.join(data_dir, 'test_file_list_large.txt')
+TRAINING_FILE_LIST = os.path.join(data_dir, 'train_file_list.txt')
+TESTING_FILE_LIST = os.path.join(data_dir, 'test_file_list.txt')
 
 MODEL_STORAGE_PATH = os.path.join(output_dir, 'trained_models')
 if not os.path.exists(MODEL_STORAGE_PATH):
@@ -185,13 +187,6 @@ def train():
 
         train_writer = tf.summary.FileWriter(SUMMARIES_FOLDER + '/train', sess.graph)
         test_writer = tf.summary.FileWriter(SUMMARIES_FOLDER + '/test')
-
-        train_file_list = provider.getDataFiles(TRAINING_FILE_LIST)
-        #num_train_file = len(train_file_list)
-        num_train_file = 20
-        test_file_list = provider.getDataFiles(TESTING_FILE_LIST)
-        num_test_file = 20
-        #num_test_file = len(test_file_list)
 
         fcmd = open(os.path.join(LOG_STORAGE_PATH, 'cmd.txt'), 'w')
         fcmd.write(str(FLAGS))
@@ -363,16 +358,22 @@ def train():
         if not os.path.exists(MODEL_STORAGE_PATH):
             os.mkdir(MODEL_STORAGE_PATH)
 
+        train_file_list = provider.getDataFiles(TRAINING_FILE_LIST)
+        num_train_file = len(train_file_list)
+        #num_train_file = 20
+        test_file_list = provider.getDataFiles(TESTING_FILE_LIST)
+        #num_test_file = 10
+        num_test_file = len(test_file_list)
+
         # load training data
-        printout(flog, '\tLoading total %d training data. Might take a few minutes' % num_train_file)
+        print('\tLoading total %d training data. Might take a few minutes' % num_train_file)
         train_data = np.empty([num_train_file, point_num, 3], dtype=np.float32)
         train_seg = np.empty([num_train_file, point_num], dtype=np.int32)
         train_labels = np.empty([num_train_file], dtype=np.int32)
 
         for i in range(num_train_file):
             cur_train_filename = os.path.join(data_dir, train_file_list[i])
-            # printout(flog, 'Loading train file ' + cur_train_filename)
-
+            print(i)
             data, label, seg = provider.loadDataFile_with_seg(cur_train_filename, point_num)
             train_data[i, :, :] = data
             train_seg[i, :] = seg
@@ -381,15 +382,14 @@ def train():
         train_labels_one_hot = convert_label_to_one_hot(train_labels)
 
         # load testing data
-        printout(flog, '\tLoading total %d testing data. Might take a few minutes' % num_test_file)
+        print('\tLoading total %d testing data. Might take a few minutes' % num_test_file)
         test_data = np.empty([num_test_file, point_num, 3], dtype=np.float32)
         test_seg = np.empty([num_test_file, point_num], dtype=np.int32)
         test_labels = np.empty([num_test_file], dtype=np.int32)
 
         for i in range(num_test_file):
             cur_train_filename = os.path.join(data_dir, test_file_list[i])
-            # printout(flog, 'Loading train file ' + cur_train_filename)
-
+            print(i)
             data, label, seg = provider.loadDataFile_with_seg(cur_train_filename, point_num)
             test_data[i, :, :] = data
             test_seg[i, :] = seg
@@ -422,3 +422,4 @@ def train():
 
 if __name__=='__main__':
     train()
+

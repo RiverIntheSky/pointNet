@@ -3,6 +3,7 @@ import numpy as np
 import random
 import os
 from PIL import Image
+import time
 
 dic = {'Rigid_0'      : 0,
        'Rigid_3'      : 1,
@@ -17,7 +18,11 @@ dic = {'Rigid_0'      : 0,
        'Module_C'     :10,
        'Roof'         :11,
        'Stairs'       :12,
-       'module_A'     :13}
+       'module_A'     :13,
+       'Bridge_Large' :14,
+       'Bridge_Small' :15,
+       'Building_Big' :16,
+       'Building_Small':17}
 	
 def MTL(filename):
     contents = {}
@@ -85,6 +90,7 @@ def random_point_on_line(p1, p2):
     return p1 * (1 - r) + p2 * r
 
 def sample_points(obj, n_samples):
+    # sample points and fir into unit sphere
     points_seg = obj.vertices
     random.shuffle(points_seg)           # maybe will be shuffled in the network input??
 	
@@ -120,6 +126,12 @@ def sample_points(obj, n_samples):
             points = np.append(points, np.array([nv]), axis = 0)
             seg = np.append(seg, mat)
             samples_left -= 1
+
+
+    center = np.mean(points, axis=0, keepdims=True)
+    scale = np.max(np.amax(points, axis=0) - np.amin(points, axis=0))
+    points = (points - center) / scale
+
     return points, seg
 	
 def getDataFiles(list_filename):
@@ -129,7 +141,7 @@ def loadDataFile_with_seg(filename, n_samples):
     obj = OBJ(filename)
     points, seg = sample_points(obj, n_samples)
     category = filename.split('/')[-2]
-    category = category.replace('test_', '')
+    # category = category.replace('test_', '')
     #############################
     if category == 'church':
         label = 0
@@ -137,6 +149,8 @@ def loadDataFile_with_seg(filename, n_samples):
         label = 1
     elif category == 'playground':
         label = 2
+    elif category == 'moon_base':
+        label = 3
     else:
         pass
     #############################

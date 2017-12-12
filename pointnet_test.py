@@ -8,8 +8,9 @@ import fileLoader as provider
 
 point_num = 2048
 num_labels = 3
-segmentation = True
+segmentation = False
 part_num=14
+batch_size = 32
 
 def generate_data(batch_size=32, n_samples=1024):
     out = np.zeros((batch_size, n_samples, 3))
@@ -125,14 +126,49 @@ def generate_data(batch_size=32, n_samples=1024):
 import sys
 import keras
 from keras.models import Sequential, Model
-from keras.layers import Dense, Dropout, Activation, Flatten, Input
+from keras.layers import Dense, Dropout, Activation, Flatten, Input, Reshape
 from keras.layers import Conv2D, MaxPooling2D
 import os
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
+sys.path.append(os.path.dirname(BASE_DIR))
+data_dir = os.path.join(BASE_DIR, './scenes')
+
+TRAINING_FILE_LIST = os.path.join(data_dir, 'train_file_list_large.txt')
+TESTING_FILE_LIST = os.path.join(data_dir, 'test_file_list_large.txt')
+
+train_file_list = provider.getDataFiles(TRAINING_FILE_LIST)
+num_train_file = len(train_file_list)
+#num_train_file = 160
+test_file_list = provider.getDataFiles(TESTING_FILE_LIST)
+num_test_file = len(test_file_list)
+#num_test_file = 160
+
+train_data = np.empty([num_train_file, point_num, 3], dtype=np.float32)
+train_labels = np.empty([num_train_file], dtype=np.int32)
+
+test_data = np.empty([num_test_file, point_num, 3], dtype=np.float32)
+test_labels = np.empty([num_test_file], dtype=np.int32)
+
+for i in range(num_train_file):
+    cur_train_filename = os.path.join(data_dir, train_file_list[i])
+    data, label, _ = provider.loadDataFile_with_seg(cur_train_filename, point_num)
+
+    train_data[i, :, :] = data
+    train_labels[i] = label
+
+for i in range(num_test_file):
+    cur_test_filename = os.path.join(data_dir, test_file_list[i])
+    data, label, _ = provider.loadDataFile_with_seg(cur_test_filename, point_num)
+    test_data[i, :, :] = data
+    test_labels[i] = label
+
+
 if segmentation:
-    point_data = Input(shape=(num_train_file, point_num, 3, 1), dtype='float32', name='point_cloud')
+        point_data = Input(shape=(None, point_num, 3, 1), dtype='float32', name='point_cloud')
     # transformation 1
-    out1 = Conv2D(64, (1, 3), padding='valid', batch_input_shape=(32, point_num, 3, 1), activation='relu')(point_data)
+    out1 = Conv2D(64, (1, 3), padding='valid', activation='relu')(point_data)
     out2 = Conv2D(128, (1, 1), activation='relu')(out1)
     out3 = Conv2D(128, (1, 1), activation='relu')(out2)
 
@@ -149,7 +185,8 @@ if segmentation:
     cls_out = Dense(num_labels, activation='softmax')(net)
 
     # segmentation network
-    label = Input(shape=(num_train_file, 1, 1, num_labels))
+    label = Input(shape=(None, num_labels))
+    label = Reshape((-1, 1, 1, num_labels))(label)
     out_max = keras.layers.concatenate([out_max, label], axis = 3)
 
     expand = keras.backend.tile(out_max, [1, point_num, 1, 1])
@@ -162,12 +199,17 @@ if segmentation:
     net2 = Dropout(0.8)(net2)
     net2 = Conv2D(128, (1,1), padding='valid', activation='relu')(net2)
     net2 = Conv2D(part_num, (1,1), padding='valid')(net2)
-
-    net2 = tf.reshape(net2, [batch_size, num_point, part_num])
+    model = Model(inputs=[point_data, label], outputs=[cls_out, net2])
+    model.compile(loss='categorical_crossentropy', optimizer=adam, metrics=['accuracy'])
+    labels_one_hot = to_categorical(train_labels, num_labels)
+    #model.fit([np.expand_dims(train_data, axis=3), labels_one_hot],
+    #        [labels_one_hot, ], batch_size=batch_size,
+    #          epochs=30)
+    #net2 = tf.reshape(net2, [batch_size, num_point, part_num])
 
 else:
     model = Sequential()
-    model.add(Conv2D(64, (1, 3), padding='valid', batch_input_shape=(32, point_num, 3, 1))) #Note: assumes tensor flow channel ordering B x W x H x C
+    model.add(Conv2D(64, (1, 3), padding='valid', batch_input_shape=(batch_size, point_num, 3, 1))) #Note: assumes tensor flow channel ordering B x W x H x C
     model.add(Activation('relu'))
     model.add(Conv2D(64, (1, 1)))
     model.add(Activation('relu'))
@@ -189,50 +231,23 @@ else:
     model.add(Dense(num_labels))
     model.add(Activation('softmax'))
 
+    model.compile(loss='categorical_crossentropy', optimizer=adam, metrics=['accuracy'])
+    model.fit(np.expand_dims(train_data, axis=3), to_categorical(train_labels, num_labels), batch_size=batch_size,
+              epochs=30)
+
 
 #sgd = keras.optimizers.SGD(lr=0.001, decay=1e-6, momentum=0.9, nesterov=True)
 adam = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
-model.compile(loss='categorical_crossentropy', optimizer=adam, metrics=['accuracy'])
+
 
 #data,labels = generate_data(32, 1024)
 
 #data, labels = generate_data(4096, num_point)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
-sys.path.append(os.path.dirname(BASE_DIR))
-data_dir = os.path.join(BASE_DIR, './scenes')
 
-TRAINING_FILE_LIST = os.path.join(data_dir, 'train_file_list_large.txt')
-TESTING_FILE_LIST = os.path.join(data_dir, 'test_file_list_large.txt')
 
-train_file_list = provider.getDataFiles(TRAINING_FILE_LIST)
-num_train_file = len(train_file_list)
-test_file_list = provider.getDataFiles(TESTING_FILE_LIST)
-num_test_file = len(test_file_list)
-
-train_data = np.empty([num_train_file, point_num, 3], dtype=np.float32)
-train_labels = np.empty([num_train_file], dtype=np.int32)
-
-test_data = np.empty([num_test_file, point_num, 3], dtype=np.float32)
-test_labels = np.empty([num_test_file], dtype=np.int32)
-
-for i in range(num_train_file):
-    cur_train_filename = os.path.join(data_dir, train_file_list[i])
-    data, label, _ = provider.loadDataFile_with_seg(cur_train_filename, point_num)
-
-    train_data[i, :, :] = data
-    train_labels[i] = label
-
-model.fit(np.expand_dims(train_data, axis = 3), to_categorical(train_labels, num_labels), batch_size=32, epochs=30)
 
 print('Testing:')
 #test_data, test_labels = generate_data(32, num_point)
-for i in range(num_test_file):
-    cur_test_filename = os.path.join(data_dir, test_file_list[i])
-    data, label, _ = provider.loadDataFile_with_seg(cur_test_filename, point_num)
 
-    test_data[i, :, :] = data
-    test_labels[i] = label
-
-score = model.evaluate(np.expand_dims(test_data, axis = 3), to_categorical(test_labels, num_labels), batch_size=32)
+score = model.evaluate(np.expand_dims(test_data, axis = 3), to_categorical(test_labels, num_labels), batch_size=batch_size)
 print('Final score: ', score)
